@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,9 +13,13 @@ type Server struct {
 	peers       map[*Peer]bool
 	addPeerChan chan *Peer
 	quitChan    chan struct{}
-	msgChan     chan []byte
-	respChan    chan []byte
+	msgChan     chan Message
 	storage     StorageCore
+}
+
+type Message struct {
+	Msg    []byte
+	Sender *Peer
 }
 
 func NewServer(cfg Config) *Server {
@@ -23,8 +28,7 @@ func NewServer(cfg Config) *Server {
 		peers:       make(map[*Peer]bool),
 		addPeerChan: make(chan *Peer),
 		quitChan:    make(chan struct{}),
-		msgChan:     make(chan []byte),
-		respChan:    make(chan []byte),
+		msgChan:     make(chan Message),
 		storage:     NewMemoryStorageCore(),
 	}
 }
@@ -53,13 +57,10 @@ func (s *Server) acceptLoop() error {
 func (s *Server) loop() {
 	for {
 		select {
-		case rawMsg := <-s.msgChan:
-			err := s.handleRawMsg(rawMsg)
+		case msg := <-s.msgChan:
+			err := s.handleMsg(msg)
 			if err != nil {
-				go func() {
-					s.respChan <- []byte(err.Error())
-				}()
-				slog.Error("handle message err", "err", err.Error())
+				msg.Sender.Send([]byte(err.Error()))
 			}
 		case peer := <-s.addPeerChan:
 			s.peers[peer] = true
@@ -70,29 +71,27 @@ func (s *Server) loop() {
 	}
 }
 func (s *Server) handleConn(conn net.Conn) {
-	peer := NewPeer(conn, s.msgChan, s.respChan)
+	peer := NewPeer(conn, s.msgChan)
 	s.addPeerChan <- peer
-	go func() {
-		if err := peer.readLoop(); err != nil {
-			slog.Error("peer read loop err", "err", err)
-		}
-	}()
-	go func() {
-		if err := peer.respLoop(); err != nil {
-			slog.Error("peer resp loop err", "err", err)
-		}
-	}()
+	if err := peer.readLoop(); err != nil {
+		slog.Error("peer read loop err", "err", err)
+	}
 }
 
-func (s *Server) handleRawMsg(msg []byte) error {
-	cmd, err := parseCommand(string(msg))
+func (s *Server) handleMsg(msg Message) error {
+	cmd, err := parseCommand(string(msg.Msg))
 	if err != nil {
 		return err
 	}
 	storage := s.storage.GetStorage(0, true)
-	err = cmd.Execute(storage) // later we add ability to select database numbere
+	resp, err := cmd.Execute(storage) // later we add ability to select database numbere
 	if err != nil {
 		return err
 	}
+	sendData, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	msg.Sender.Send(sendData)
 	return nil
 }

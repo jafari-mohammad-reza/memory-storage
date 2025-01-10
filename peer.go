@@ -6,16 +6,14 @@ import (
 )
 
 type Peer struct {
-	conn     net.Conn
-	msgChan  chan []byte
-	respChan chan []byte
+	conn    net.Conn
+	msgChan chan Message
 }
 
-func NewPeer(conn net.Conn, msgChan chan []byte, respChan chan []byte) *Peer {
+func NewPeer(conn net.Conn, msgChan chan Message) *Peer {
 	return &Peer{
 		conn,
 		msgChan,
-		respChan,
 	}
 }
 
@@ -29,17 +27,19 @@ func (p *Peer) readLoop() error {
 		}
 		msgBuff := make([]byte, n)
 		copy(msgBuff, buf[:n])
-		p.msgChan <- msgBuff
+		msg := Message{
+			Msg:    msgBuff,
+			Sender: p,
+		}
+		p.msgChan <- msg
 	}
 }
 
-func (p *Peer) respLoop() error {
-	for resp := range p.respChan {
-		_, err := p.conn.Write(resp)
-		if err != nil {
-			slog.Error("writing response error", "err", err)
-			return err
-		}
+func (p *Peer) Send(msg []byte) error {
+	_, err := p.conn.Write(msg)
+	if err != nil {
+		slog.Error("peer failed to send message", "err", err)
+		return err
 	}
 	return nil
 }
