@@ -2,12 +2,21 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
 type Command interface {
 	Execute() error
 }
+
+type KeysCommand struct{}
+
+func (c *KeysCommand) Execute() error {
+	fmt.Println("Keys command got executed")
+	return nil
+}
+
 type SetCommand struct {
 	key string
 	val string
@@ -21,6 +30,7 @@ func (c *SetCommand) Execute() error {
 	if val == "" {
 		return errors.New("must enter a value")
 	}
+	fmt.Printf("SET executed key: %s , value: %s", c.key, c.val)
 	return nil
 }
 
@@ -33,6 +43,7 @@ func (c *GetCommand) Execute() error {
 	if key == "" {
 		return errors.New("must enter a key")
 	}
+	fmt.Printf("GET executed key: %s", c.key)
 	return nil
 }
 
@@ -45,6 +56,7 @@ func (c *DelCommand) Execute() error {
 	if key == "" {
 		return errors.New("must enter a key")
 	}
+	fmt.Printf("DEL executed key: %s", c.key)
 	return nil
 }
 
