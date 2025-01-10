@@ -13,6 +13,8 @@ type Server struct {
 	addPeerChan chan *Peer
 	quitChan    chan struct{}
 	msgChan     chan []byte
+	respChan    chan []byte
+	storage     StorageCore
 }
 
 func NewServer(cfg Config) *Server {
@@ -22,6 +24,8 @@ func NewServer(cfg Config) *Server {
 		addPeerChan: make(chan *Peer),
 		quitChan:    make(chan struct{}),
 		msgChan:     make(chan []byte),
+		respChan:    make(chan []byte),
+		storage:     NewMemoryStorageCore(),
 	}
 }
 
@@ -52,6 +56,9 @@ func (s *Server) loop() {
 		case rawMsg := <-s.msgChan:
 			err := s.handleRawMsg(rawMsg)
 			if err != nil {
+				go func() {
+					s.respChan <- []byte(err.Error())
+				}()
 				slog.Error("handle message err", "err", err.Error())
 			}
 		case peer := <-s.addPeerChan:
@@ -63,11 +70,18 @@ func (s *Server) loop() {
 	}
 }
 func (s *Server) handleConn(conn net.Conn) {
-	peer := NewPeer(conn, s.msgChan)
+	peer := NewPeer(conn, s.msgChan, s.respChan)
 	s.addPeerChan <- peer
-	if err := peer.readLoop(); err != nil {
-		slog.Error("peer read loop err", "err", err)
-	}
+	go func() {
+		if err := peer.readLoop(); err != nil {
+			slog.Error("peer read loop err", "err", err)
+		}
+	}()
+	go func() {
+		if err := peer.respLoop(); err != nil {
+			slog.Error("peer resp loop err", "err", err)
+		}
+	}()
 }
 
 func (s *Server) handleRawMsg(msg []byte) error {
@@ -75,7 +89,8 @@ func (s *Server) handleRawMsg(msg []byte) error {
 	if err != nil {
 		return err
 	}
-	err = cmd.Execute()
+	storage := s.storage.GetStorage(0, true)
+	err = cmd.Execute(storage) // later we add ability to select database numbere
 	if err != nil {
 		return err
 	}
