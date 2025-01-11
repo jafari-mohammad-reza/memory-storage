@@ -35,7 +35,7 @@ func (c *SetCommand) Execute(s Storage) (interface{}, error) {
 		return nil, errors.New("must enter a value")
 	}
 
-	err := s.Set(key, val)
+	err := s.Set(key, []byte(val))
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (c *GetCommand) Execute(s Storage) (interface{}, error) {
 		return nil, err
 	}
 	fmt.Printf("GET executed key: %s", c.key)
-	return val.Value, nil
+	return string(*val), nil
 }
 
 type DelCommand struct {
@@ -76,6 +76,69 @@ func (c *DelCommand) Execute(s Storage) (interface{}, error) {
 	return fmt.Sprintf("DEL executed key: %s", c.key), nil
 }
 
+type RKeysCommand struct {
+	key string
+}
+
+func (c *RKeysCommand) Execute(s Storage) (interface{}, error) {
+	fmt.Println("RKeys command got executed")
+	keys, err := s.RKeys()
+	if err != nil {
+		return nil, err
+	}
+	return string(keys), nil
+}
+
+type RSetCommand struct {
+	val string
+}
+
+func (c *RSetCommand) Execute(s Storage) (interface{}, error) {
+	val := c.val
+
+	if val == "" {
+		return nil, errors.New("must enter a value")
+	}
+
+	err := s.RSet([]byte(val))
+	if err != nil {
+		return nil, err
+	}
+	return fmt.Sprintf("RSET executed value: %s", val), nil
+}
+
+type RDelCommand struct {
+	val string
+}
+
+func (c *RDelCommand) Execute(s Storage) (interface{}, error) {
+	val := c.val
+	if val == "" {
+		return nil, errors.New("must enter a val")
+	}
+	err := s.RDel([]byte(val))
+	if err != nil {
+		return nil, err
+	}
+
+	return fmt.Sprintf("DEL executed value: %s", val), nil
+}
+
+type RGetCommand struct {
+	val string
+}
+
+func (c *RGetCommand) Execute(s Storage) (interface{}, error) {
+	val := c.val
+	if val == "" {
+		return nil, errors.New("must enter a val")
+	}
+	foundVal, err := s.RGet([]byte(val))
+	if err != nil {
+		return nil, err
+	}
+	return string(foundVal), nil
+}
 func parseCommand(cmd string) (Command, error) {
 	inp := strings.Fields(cmd)
 	if len(inp) != 0 {
@@ -105,6 +168,30 @@ func parseCommand(cmd string) (Command, error) {
 			return &DelCommand{
 				key: inp[1],
 			}, nil
+		case "rkey":
+			return &RKeysCommand{}, nil
+		case "rget":
+			if len(inp) != 2 {
+				return nil, errors.New("RGet command needs value")
+			}
+			return &RGetCommand{
+				val: inp[1],
+			}, nil
+		case "rdel":
+			if len(inp) != 2 {
+				return nil, errors.New("RDel command needs value")
+			}
+			return &RDelCommand{
+				val: inp[1],
+			}, nil
+		case "rset":
+			if len(inp) != 2 {
+				return nil, errors.New("RSet command needs value")
+			}
+			return &RSetCommand{
+				val: inp[1],
+			}, nil
+
 		default:
 			return nil, errors.New("invalid command")
 		}
