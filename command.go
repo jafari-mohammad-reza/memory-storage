@@ -139,12 +139,23 @@ func (c *RGetCommand) Execute(s Storage) (interface{}, error) {
 	}
 	return string(foundVal), nil
 }
+
+type RecoverCommand struct {
+}
+
+func (c *RecoverCommand) Execute(s Storage) (interface{}, error) {
+	err := s.RecoverFromLogs()
+	if err != nil {
+		return nil, err
+	}
+	return "recovered successfully", nil
+}
+
 func parseCommand(cmd string) (Command, error) {
 	inp := strings.Fields(cmd)
 	if len(inp) != 0 {
 		switch strings.ToLower(strings.TrimSpace(inp[0])) {
 		case "keys":
-
 			return &KeysCommand{}, nil
 		case "set":
 			if len(inp) != 3 {
@@ -191,7 +202,8 @@ func parseCommand(cmd string) (Command, error) {
 			return &RSetCommand{
 				val: inp[1],
 			}, nil
-
+		case "recover":
+			return &RecoverCommand{}, nil
 		default:
 			return nil, errors.New("invalid command")
 		}

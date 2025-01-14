@@ -116,39 +116,27 @@ func NewStorage(id int, log bool) *MemoryStorage {
 }
 
 func (s *MemoryStorage) RKeys() ([]byte, error) {
-	if s.log {
-		defer s.Log("KEYS")
-	}
 	return s.listStorage.ShowAll()
 }
 func (s *MemoryStorage) RGet(value []byte) ([]byte, error) {
-	if s.log {
-		defer s.Log("KEYS")
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.listStorage.Get(value)
 }
 func (s *MemoryStorage) RSet(value []byte) error {
 	if s.log {
-		defer s.Log("KEYS")
+		defer s.Log("RSET")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.listStorage.Insert(value)
 }
 func (s *MemoryStorage) RDel(value []byte) error {
-	if s.log {
-		defer s.Log("KEYS")
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.listStorage.Delete(value)
 }
 func (s *MemoryStorage) Keys() ([]string, error) {
-	if s.log {
-		defer s.Log("KEYS")
-	}
 	var keys []string
 	for key, _ := range s.mapStorage {
 		keys = append(keys, key)
@@ -157,9 +145,6 @@ func (s *MemoryStorage) Keys() ([]string, error) {
 }
 
 func (s *MemoryStorage) Get(key string) (*[]byte, error) {
-	if s.log {
-		defer s.Log("GET", key)
-	}
 	val := s.mapStorage[key]
 	if val == nil {
 		return nil, fmt.Errorf("there is no item with key of %s", key)
@@ -168,9 +153,6 @@ func (s *MemoryStorage) Get(key string) (*[]byte, error) {
 }
 
 func (s *MemoryStorage) Del(key string) error {
-	if s.log {
-		defer s.Log("DEL", key)
-	}
 	val := s.mapStorage[key]
 	if val == nil {
 		return fmt.Errorf("there is no item with key of %s", key)
@@ -198,25 +180,57 @@ type LogData struct {
 }
 
 func (s *MemoryStorage) Log(command string, arg ...interface{}) error {
-	logFile, err := os.OpenFile(fmt.Sprintf("storage_%d.log", s.Id), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(fmt.Sprintf("storage_%d.json", s.Id), os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return err
 	}
+	defer logFile.Close()
+
+	stat, err := logFile.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Size() == 0 {
+		if _, err := logFile.Write([]byte("[]")); err != nil {
+			return err
+		}
+	}
+
+	var logs []LogData
+	if _, err := logFile.Seek(0, 0); err != nil {
+		return err
+	}
+	if err := json.NewDecoder(logFile).Decode(&logs); err != nil {
+		return err
+	}
+
 	data := LogData{
 		Action: command,
 		Args:   make([]string, 0),
 	}
 	for _, a := range arg {
-		data.Args = append(data.Args, a.(string))
+		switch v := a.(type) {
+		case string:
+			data.Args = append(data.Args, v)
+		case []uint8:
+			data.Args = append(data.Args, string(v))
+		default:
+			continue
+		}
 	}
-	log, err := json.Marshal(data)
-	if err != nil {
+
+	logs = append(logs, data)
+
+	if err := logFile.Truncate(0); err != nil {
 		return err
 	}
-	_, err = logFile.Write(log)
-	if err != nil {
+	if _, err := logFile.Seek(0, 0); err != nil {
 		return err
 	}
+	if err := json.NewEncoder(logFile).Encode(logs); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -230,11 +244,11 @@ type Storage interface {
 	RGet(value []byte) ([]byte, error)
 	RDel(value []byte) error
 	Log(command string, arg ...interface{}) error
+	RecoverFromLogs() error
 }
 
 type StorageCore interface {
 	GetStorage(id int, log bool) Storage
-	RecoverFromLogs(storageId int) error
 }
 
 type MemoryStorageCore struct {
@@ -243,7 +257,7 @@ type MemoryStorageCore struct {
 
 func NewMemoryStorageCore() *MemoryStorageCore {
 	storages := make([]*MemoryStorage, 0)
-	storages = append(storages, NewStorage(0, false))
+	storages = append(storages, NewStorage(0, true))
 	return &MemoryStorageCore{
 		Storages: storages,
 	}
@@ -265,7 +279,31 @@ func (sc *MemoryStorageCore) GetStorage(id int, log bool) Storage {
 	return storage
 }
 
-func (sc *MemoryStorageCore) RecoverFromLogs(storageId int) error {
-	// this method will recover given id storage from logs of that storage id and append it to core
+func (s *MemoryStorage) RecoverFromLogs() error {
+	fmt.Println("recovering from logs")
+	logData, err := os.ReadFile(fmt.Sprintf("storage_%d.json", s.Id))
+	if err != nil {
+		return err
+	}
+	var logEntries []LogData
+	err = json.Unmarshal(logData, &logEntries)
+	if err != nil {
+		return err
+	}
+	for _, entry := range logEntries {
+		fmt.Printf("Processing Action: %s, Args: %v\n", entry.Action, entry.Args)
+		switch entry.Action {
+		case "SET":
+			if len(entry.Args) >= 2 {
+				s.Set(entry.Args[0], []byte(entry.Args[1]))
+			}
+		case "RSET":
+			if len(entry.Args) >= 1 {
+				s.RSet([]byte(entry.Args[1]))
+			}
+		default:
+			fmt.Printf("Unknown action: %s\n", entry.Action)
+		}
+	}
 	return nil
 }
