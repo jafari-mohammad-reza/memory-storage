@@ -41,7 +41,6 @@ func (s *Server) Start() error {
 	s.ln = ln
 	go s.loop()
 	slog.Info("server running", "listenAddr", s.Cfg.ServerListenAddr)
-	fmt.Println(s.ln)
 	return s.acceptLoop()
 }
 func (s *Server) Stop() error {
